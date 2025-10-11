@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-recreate
+  labels:
+    app: legacy-app
+spec:
+  replicas: 2
+  
+  # Recreate strategy - удаляет все старые pods перед созданием новых
+  # Будет downtime во время обновления!
+  strategy:
+    type: Recreate
+  
+  selector:
+    matchLabels:
+      app: legacy-app
+  
+  template:
+    metadata:
+      labels:
+        app: legacy-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.24  # Старая версия
+        ports:
+        - containerPort: 80
+

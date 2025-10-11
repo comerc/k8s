@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-with-resources
+  labels:
+    app: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.25
+    ports:
+    - containerPort: 80
+    
+    # Ресурсы: requests (гарантированные) и limits (максимальные)
+    resources:
+      requests:
+        memory: "64Mi"   # Минимально необходимая память
+        cpu: "250m"      # 0.25 CPU (250 millicores)
+      limits:
+        memory: "128Mi"  # Максимальная память
+        cpu: "500m"      # 0.5 CPU
+

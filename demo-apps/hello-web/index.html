@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello from Kubernetes!</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+        h1 {
+            font-size: 3em;
+            margin-bottom: 20px;
+            animation: fadeIn 1s ease-in;
+        }
+        p {
+            font-size: 1.2em;
+            margin: 10px 0;
+        }
+        .emoji {
+            font-size: 4em;
+            margin: 20px 0;
+            animation: bounce 2s infinite;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-20px); }
+        }
+        .info {
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="emoji">☸️</div>
+        <h1>Hello from Kubernetes!</h1>
+        <p>Ваше первое приложение успешно работает в K8s</p>
+        <div class="info">
+            <p><strong>Pod:</strong> <span id="hostname">Loading...</span></p>
+            <p><strong>Версия:</strong> v1.0.0</p>
+            <p><strong>Статус:</strong> ✅ Работает</p>
+        </div>
+    </div>
+    <script>
+        // Получить hostname (имя пода)
+        fetch('/api/hostname')
+            .catch(() => {
+                document.getElementById('hostname').textContent = window.location.hostname;
+            });
+    </script>
+</body>
+</html>
+

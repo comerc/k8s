@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-with-strategy
+  labels:
+    app: web
+spec:
+  replicas: 4
+  
+  # Стратегия обновления
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1         # Можно создать 1 дополнительный pod во время обновления
+      maxUnavailable: 1   # Максимум 1 pod может быть недоступен
+  
+  # Сколько старых ReplicaSets сохранять для rollback
+  revisionHistoryLimit: 10
+  
+  selector:
+    matchLabels:
+      app: web
+      tier: frontend
+  
+  template:
+    metadata:
+      labels:
+        app: web
+        tier: frontend
+        version: v1
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25
+        ports:
+        - containerPort: 80
+          name: http
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+

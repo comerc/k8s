@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-web
+  labels:
+    app: hello-web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hello-web
+  template:
+    metadata:
+      labels:
+        app: hello-web
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25-alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: html
+          mountPath: /usr/share/nginx/html
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 3
+          periodSeconds: 5
+      volumes:
+      - name: html
+        configMap:
+          name: hello-web-html
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-web-html
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Hello from Kubernetes!</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                color: white;
+            }
+            .container {
+                text-align: center;
+                padding: 40px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+                box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            }
+            h1 { font-size: 3em; margin-bottom: 20px; }
+            p { font-size: 1.2em; margin: 10px 0; }
+            .emoji { font-size: 4em; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="emoji">☸️</div>
+            <h1>Hello from Kubernetes!</h1>
+            <p>Ваше первое приложение успешно работает в K8s</p>
+        </div>
+    </body>
+    </html>
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-web
+  labels:
+    app: hello-web
+spec:
+  type: NodePort
+  selector:
+    app: hello-web
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30100
+

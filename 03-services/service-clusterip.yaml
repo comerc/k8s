@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  labels:
+    app: nginx
+spec:
+  type: ClusterIP  # По умолчанию, можно не указывать
+  selector:
+    app: nginx     # Все Pods с этой меткой будут за этим Service
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80       # Порт Service
+    targetPort: 80 # Порт контейнера
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx  # Эта метка связывает Pod с Service
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25
+        ports:
+        - containerPort: 80
+

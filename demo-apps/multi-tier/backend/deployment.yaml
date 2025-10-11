@@ -1,0 +1,206 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: multi-tier
+data:
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_NAME: "appdb"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: multi-tier
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: golang:1.21-alpine
+        workingDir: /app
+        command:
+        - /bin/sh
+        - -c
+        - |
+          cat > /app/go.mod << 'EOF'
+          module backend
+          go 1.21
+          require github.com/lib/pq v1.10.9
+          EOF
+          
+          cat > /app/main.go << 'GOEOF'
+          package main
+          import (
+            "database/sql"
+            "encoding/json"
+            "fmt"
+            "log"
+            "net/http"
+            "os"
+            "time"
+            _ "github.com/lib/pq"
+          )
+          
+          type Item struct {
+            ID        int       \`json:"id"\`
+            Name      string    \`json:"name"\`
+            CreatedAt time.Time \`json:"created_at"\`
+          }
+          
+          type HealthResponse struct {
+            Status string \`json:"status"\`
+            Error  string \`json:"error,omitempty"\`
+          }
+          
+          var db *sql.DB
+          
+          func main() {
+            dbHost := os.Getenv("DB_HOST")
+            dbPort := os.Getenv("DB_PORT")
+            dbName := os.Getenv("DB_NAME")
+            dbUser := os.Getenv("DB_USER")
+            dbPassword := os.Getenv("DB_PASSWORD")
+            
+            connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+              dbHost, dbPort, dbUser, dbPassword, dbName)
+            
+            var err error
+            db, err = sql.Open("postgres", connStr)
+            if err != nil {
+              log.Fatal("DB connection error:", err)
+            }
+            defer db.Close()
+            
+            for i := 0; i < 30; i++ {
+              if err := db.Ping(); err == nil {
+                log.Println("✅ Connected to PostgreSQL")
+                break
+              }
+              log.Printf("Waiting for PostgreSQL... (%d/30)", i+1)
+              time.Sleep(2 * time.Second)
+            }
+            
+            _, _ = db.Exec(\`CREATE TABLE IF NOT EXISTS items (
+              id SERIAL PRIMARY KEY,
+              name VARCHAR(255) NOT NULL,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )\`)
+            
+            http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+              w.Header().Set("Content-Type", "application/json")
+              if err := db.Ping(); err != nil {
+                w.WriteHeader(503)
+                json.NewEncoder(w).Encode(HealthResponse{Status: "unhealthy", Error: err.Error()})
+                return
+              }
+              json.NewEncoder(w).Encode(HealthResponse{Status: "healthy"})
+            })
+            
+            http.HandleFunc("/api/items", func(w http.ResponseWriter, r *http.Request) {
+              w.Header().Set("Content-Type", "application/json")
+              w.Header().Set("Access-Control-Allow-Origin", "*")
+              w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+              w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+              
+              if r.Method == "OPTIONS" {
+                return
+              }
+              
+              if r.Method == "GET" {
+                rows, _ := db.Query("SELECT id, name, created_at FROM items ORDER BY id")
+                defer rows.Close()
+                items := []Item{}
+                for rows.Next() {
+                  var item Item
+                  rows.Scan(&item.ID, &item.Name, &item.CreatedAt)
+                  items = append(items, item)
+                }
+                json.NewEncoder(w).Encode(items)
+              } else if r.Method == "POST" {
+                var item Item
+                json.NewDecoder(r.Body).Decode(&item)
+                db.QueryRow("INSERT INTO items (name) VALUES (\$1) RETURNING id, created_at",
+                  item.Name).Scan(&item.ID, &item.CreatedAt)
+                w.WriteHeader(201)
+                json.NewEncoder(w).Encode(item)
+              }
+            })
+            
+            log.Println("🚀 Backend API (Go) starting on port 3000")
+            http.ListenAndServe(":3000", nil)
+          }
+          GOEOF
+          
+          go mod download
+          go run main.go
+        ports:
+        - containerPort: 3000
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: backend-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: backend-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: backend-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: password
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 20
+          periodSeconds: 5
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: multi-tier
+spec:
+  selector:
+    app: backend
+  ports:
+  - port: 3000
+    targetPort: 3000
+

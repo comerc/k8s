@@ -1,0 +1,279 @@
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+
+---
+# Counter App ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: counter-config
+data:
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+
+---
+# Counter App Deployment (Go version)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: counter-app-go
+  labels:
+    app: counter-app-go
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: counter-app-go
+  template:
+    metadata:
+      labels:
+        app: counter-app-go
+    spec:
+      containers:
+      - name: app
+        image: golang:1.21-alpine
+        workingDir: /app
+        command:
+        - /bin/sh
+        - -c
+        - |
+          cat > /app/go.mod << 'EOF'
+          module counter-app
+          go 1.21
+          require github.com/go-redis/redis/v8 v8.11.5
+          require (
+            github.com/cespare/xxhash/v2 v2.1.2 // indirect
+            github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+          )
+          EOF
+          
+          cat > /app/main.go << 'GOEOF'
+          package main
+          
+          import (
+            "context"
+            "fmt"
+            "html/template"
+            "log"
+            "net/http"
+            "os"
+            "github.com/go-redis/redis/v8"
+          )
+          
+          var (
+            ctx = context.Background()
+            redisClient *redis.Client
+            hostname string
+          )
+          
+          const htmlTemplate = `<!DOCTYPE html>
+          <html lang="ru">
+          <head>
+            <meta charset="UTF-8">
+            <title>Counter App (Go)</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                color: white;
+              }
+              .container {
+                text-align: center;
+                padding: 50px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+              }
+              .counter { font-size: 5em; margin: 30px 0; font-weight: bold; color: #FFD700; }
+              button {
+                padding: 15px 30px;
+                font-size: 1.2em;
+                border: none;
+                border-radius: 10px;
+                cursor: pointer;
+                margin: 10px;
+                font-weight: bold;
+              }
+              .increment { background: #4CAF50; color: white; }
+              .reset { background: #f44336; color: white; }
+              .go-badge {
+                background: #00ADD8;
+                color: white;
+                padding: 5px 15px;
+                border-radius: 20px;
+                font-size: 0.8em;
+                margin: 10px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>🔢 Counter App</h1>
+              <span class="go-badge">⚡ Powered by Go</span>
+              <div class="counter">{{.Count}}</div>
+              <button class="increment" onclick="fetch('/increment', {method: 'POST'}).then(() => location.reload())">➕ Увеличить</button>
+              <button class="reset" onclick="fetch('/reset', {method: 'POST'}).then(() => location.reload())">🔄 Сброс</button>
+              <p>Pod: {{.Hostname}}</p>
+            </div>
+          </body>
+          </html>`
+          
+          type PageData struct {
+            Count    string
+            Hostname string
+          }
+          
+          func init() {
+            var err error
+            hostname, err = os.Hostname()
+            if err != nil {
+              hostname = "unknown"
+            }
+            redisHost := os.Getenv("REDIS_HOST")
+            if redisHost == "" {
+              redisHost = "redis"
+            }
+            redisPort := os.Getenv("REDIS_PORT")
+            if redisPort == "" {
+              redisPort = "6379"
+            }
+            redisClient = redis.NewClient(&redis.Options{
+              Addr: fmt.Sprintf("%s:%s", redisHost, redisPort),
+            })
+          }
+          
+          func main() {
+            http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+              count, err := redisClient.Get(ctx, "counter").Result()
+              if err == redis.Nil {
+                count = "0"
+              } else if err != nil {
+                http.Error(w, "Redis error", 500)
+                return
+              }
+              tmpl := template.Must(template.New("index").Parse(htmlTemplate))
+              tmpl.Execute(w, PageData{Count: count, Hostname: hostname})
+            })
+            
+            http.HandleFunc("/increment", func(w http.ResponseWriter, r *http.Request) {
+              if r.Method != http.MethodPost {
+                http.Error(w, "Method not allowed", 405)
+                return
+              }
+              redisClient.Incr(ctx, "counter")
+              w.WriteHeader(204)
+            })
+            
+            http.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
+              if r.Method != http.MethodPost {
+                http.Error(w, "Method not allowed", 405)
+                return
+              }
+              redisClient.Set(ctx, "counter", 0, 0)
+              w.WriteHeader(204)
+            })
+            
+            http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+              err := redisClient.Ping(ctx).Err()
+              if err != nil {
+                w.WriteHeader(503)
+                fmt.Fprint(w, `{"status":"unhealthy"}`)
+                return
+              }
+              w.Header().Set("Content-Type", "application/json")
+              fmt.Fprint(w, `{"status":"healthy"}`)
+            })
+            
+            log.Println("🚀 Counter App (Go) starting on port 8080")
+            http.ListenAndServe(":8080", nil)
+          }
+          GOEOF
+          
+          go mod download
+          go run main.go
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: counter-config
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 5
+
+---
+# Counter App Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: counter-app-go
+  labels:
+    app: counter-app-go
+spec:
+  type: NodePort
+  selector:
+    app: counter-app-go
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 30201
+
